@@ -329,7 +329,7 @@ function resize(){
   cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);
   HOR=H*.30;
-  grainPat=null; bgCache={};
+  fxLayer=null; bgCache={};
 }
 window.addEventListener("resize",resize);
 
@@ -367,19 +367,36 @@ function projSeg(x0,y0,z0,x1,y1,z1){
   return (a&&b)?[a,b]:null;
 }
 function fogK(d){ return clamp((d-10)/95,0,.62); }
+/* color helpers are hot paths (every limb, every grass quad, every frame) —
+   memoize both the parse and the mixed result (t quantized to 1/50) */
+const _parseCache=new Map(), _mixCache=new Map();
 function parseC(c){
-  if(c[0]==="#")return [1,3,5].map(i=>parseInt(c.substr(i,2),16));
-  const m=c.match(/[\d.]+/g); return [+m[0],+m[1],+m[2]];
+  let p=_parseCache.get(c);
+  if(!p){
+    if(c[0]==="#")p=[1,3,5].map(i=>parseInt(c.substr(i,2),16));
+    else{ const m=c.match(/[\d.]+/g); p=[+m[0],+m[1],+m[2]]; }
+    _parseCache.set(c,p);
+  }
+  return p;
 }
 function mix(c0,c1,t){
-  const pa=parseC(c0), pb=parseC(c1);
-  return `rgb(${pa.map((v,i)=>Math.round(lerp(v,pb[i],t))).join(",")})`;
+  const q=Math.round(t*50);
+  const key=c0+"|"+c1+"|"+q;
+  let r=_mixCache.get(key);
+  if(!r){
+    const pa=parseC(c0), pb=parseC(c1), k=q/50;
+    r=`rgb(${Math.round(lerp(pa[0],pb[0],k))},${Math.round(lerp(pa[1],pb[1],k))},${Math.round(lerp(pa[2],pb[2],k))})`;
+    _mixCache.set(key,r);
+  }
+  return r;
 }
 
-/* ---------------- palettes per tier ---------------- */
+/* ---------------- palettes per tier (memoized) ---------------- */
+const _palCache=[];
 function palette(tier){
+  if(_palCache[tier])return _palCache[tier];
   const T=TIERS[tier], L=T.light;
-  return {
+  return _palCache[tier]={
     skyTop:  mix("#8e979e","#161d33",L),
     skyBot:  mix("#b8bfc2","#3a4a6b",L),
     fog:     mix("#a9b0b2","#2c3752",L),
@@ -454,7 +471,7 @@ function buildScenario(tier){
 
   return {tier,T,defs,gk,passer,recv,decoys,ball,lineY0,lineV,tPass,recvSpeed,
           t:0,passed:false,truth:null,snap:null,decision:null,resolved:false,
-          windowEnd:0,arrived:false,trick,margin,flash:0,camSnap:null};
+          windowEnd:0,arrived:false,trick,margin,flash:0,trail:[]};
 }
 function secondLastY(s){ const ys=s.defs.map(d=>d.y).sort((a,b)=>b-a); return ys[1]; }
 function offsideTruth(s){
@@ -500,6 +517,8 @@ function tickScenario(s,dt){
     b.x+=b.vx*dt; b.y+=b.vy*dt;
     const k=(s.t-b.t0)/b.tAir;
     b.z=Math.max(0,Math.sin(Math.min(1,k)*Math.PI))*1.0;
+    if(k<1){ s.trail.push({x:b.x,y:b.y,z:b.z}); if(s.trail.length>7)s.trail.shift(); }
+    else if(s.trail.length)s.trail.shift();
     if(k>=1 && !s.arrived){ s.arrived=true; s.recv.vy*=.4; b.vx=0; b.vy=s.recv.vy*.9; }
   }
   if(s.arrived){ s.recv.y+=s.recv.vy*dt*.4; s.recv.phase+=dt*6; }
@@ -544,11 +563,13 @@ function bgFor(tier){
     const gg=g.createLinearGradient(0,bh-hh-10,0,bh);
     gg.addColorStop(0,P.standHi); gg.addColorStop(1,P.standLo);
     g.fillStyle=gg; g.fillRect(0,bh-hh-10,bw,hh+10);
-    // crowd speckle (muted)
+    // crowd speckle (muted, seeded LCG so no moiré banding)
     const n=Math.floor(2600*T.crowd);
+    let seed=1234567+tier*999;
+    const rnd=()=>((seed=(seed*1103515245+12345)&0x7fffffff)/0x7fffffff);
     for(let i=0;i<n;i++){
-      const x=(i*97.31)%bw, y=bh-hh-6+((i*61.7)%(hh-8));
-      const v=90+((i*37)%90);
+      const x=rnd()*bw, y=bh-hh-6+rnd()*(hh-8);
+      const v=90+rnd()*90|0;
       g.fillStyle=`rgba(${v},${v-8},${v-14},.8)`;
       g.fillRect(x,y,1.6,1.6);
     }
@@ -573,10 +594,6 @@ function bgFor(tier){
 }
 
 /* ---------------- pitch (first-person) ---------------- */
-function groundY(x){ // screen y of ground line at pitch-cross position x (depth axis), at view centre
-  const p=project(x,CAM.cy+Math.tan(CAM.yaw)*(CAM.x-x),0);   // point straight ahead at that depth
-  return p?p[1]:H;
-}
 function drawWorld(tier,t){
   const T=TIERS[tier], P=palette(tier);
   // background strip with parallax
@@ -792,9 +809,8 @@ function drawBall(b){
 
 /* hairline = my alignment (ground line at y where I'm standing, projects vertical) */
 function drawHairline(label){
-  const p=project(CAM.x-30, CAM.cy+Math.tan(CAM.yaw)*30, 0);
-  if(!p)return;
   const x=W/2 - CAM.f*Math.tan(CAM.yaw);
+  if(x<-10||x>W+10)return;
   ctx.save();
   ctx.strokeStyle="rgba(240,235,215,.34)";
   ctx.lineWidth=1;
@@ -856,25 +872,31 @@ function drawFlagArm(dt){
   ctx.restore();
 }
 
-/* film grain + vignette */
-let grainPat=null;
-function makeGrain(){
-  const c=document.createElement("canvas"); c.width=c.height=140;
-  const g=c.getContext("2d"), im=g.createImageData(140,140);
+/* film grain + vignette, pre-composed into one static layer —
+   compositing a pattern fill AND a gradient across the full screen every
+   frame is the single most expensive draw; one drawImage is far cheaper */
+let fxLayer=null;
+function makeFX(){
+  const pad=10;
+  fxLayer=document.createElement("canvas");
+  fxLayer.width=W+pad*2; fxLayer.height=H+pad*2;
+  const g=fxLayer.getContext("2d");
+  // grain tile
+  const tile=document.createElement("canvas"); tile.width=tile.height=140;
+  const tg=tile.getContext("2d"), im=tg.createImageData(140,140);
   for(let i=0;i<im.data.length;i+=4){ const v=Math.random()*255|0;
     im.data[i]=im.data[i+1]=im.data[i+2]=v; im.data[i+3]=14; }
-  g.putImageData(im,0,0);
-  grainPat=ctx.createPattern(c,"repeat");
+  tg.putImageData(im,0,0);
+  g.fillStyle=g.createPattern(tile,"repeat");
+  g.fillRect(0,0,fxLayer.width,fxLayer.height);
+  // vignette
+  const vg=g.createRadialGradient(pad+W/2,pad+H*.46,H*.30,pad+W/2,pad+H*.46,H*.82);
+  vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(2,4,5,.42)");
+  g.fillStyle=vg; g.fillRect(0,0,fxLayer.width,fxLayer.height);
 }
 function postFX(t){
-  if(!grainPat)makeGrain();
-  ctx.save();
-  ctx.translate((t*61)%17-8,(t*47)%13-6);
-  ctx.fillStyle=grainPat; ctx.fillRect(-20,-20,W+40,H+40);
-  ctx.restore();
-  const vg=ctx.createRadialGradient(W/2,H*.46,H*.30,W/2,H*.46,H*.82);
-  vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(2,4,5,.42)");
-  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+  if(!fxLayer)makeFX();
+  ctx.drawImage(fxLayer,((t*61)%17)-18,((t*47)%13)-16);
 }
 
 /* ---------------- scene draw ---------------- */
@@ -891,6 +913,14 @@ function drawScene(s,t,dt){
     if(e.role==="recv"&&!s.passed)opts.ring="rgba(232,176,75,.55)";
     drawPlayer(e,t,opts);
   }
+  // ball flight trail
+  for(let i=0;i<s.trail.length;i++){
+    const q=s.trail[i], pr=project(q.x,q.y,q.z*.9+.11);
+    if(!pr)continue;
+    const r=Math.max(1,CAM.f*.11/pr[2]*2*(.35+.5*i/s.trail.length));
+    ctx.fillStyle=`rgba(232,230,224,${.06+.09*i/s.trail.length})`;
+    ctx.beginPath();ctx.arc(pr[0],pr[1],r,0,7);ctx.fill();
+  }
   drawBall(s.ball);
   if(!s.resolved)ballCue(s);
   // pass flash: brief bright edge pulse + ring at ball if visible
@@ -905,6 +935,11 @@ function drawScene(s,t,dt){
   }
   drawFlagArm(dt);
   postFX(t);
+  // quick fade-in at the start of each phase
+  if(s.t<.4){
+    ctx.fillStyle=`rgba(5,7,8,${(1-s.t/.4)*.85})`;
+    ctx.fillRect(0,0,W,H);
+  }
 }
 
 /* VAR freeze frame: first-person with true offside line drawn on the turf */
@@ -1154,9 +1189,13 @@ let timerT0=0,timerDur=0,timerOn=false;
 function showTimer(dur){ timerDur=dur; timerT0=performance.now(); timerOn=true; $("timerWrap").style.opacity=1; }
 function hideTimer(){ timerOn=false; $("timerWrap").style.opacity=0; }
 
-/* ---------------- input ---------------- */
-$("btnFlag").addEventListener("click",()=>{ ac(); if(S.mode==="match"&&scen&&!scen.resolved)decide(true); });
-$("btnPlayOn").addEventListener("click",()=>{ ac(); if(S.mode==="match"&&scen&&!scen.resolved)decide(false); });
+/* ---------------- input ----------------
+   the two call buttons fire on pointerdown — this is a reaction game and
+   click events add ~100ms of synthesized-event latency on touch devices */
+$("btnFlag").addEventListener("pointerdown",e=>{ e.preventDefault(); ac();
+  if(S.mode==="match"&&scen&&!scen.resolved&&!$("btnFlag").disabled)decide(true); });
+$("btnPlayOn").addEventListener("pointerdown",e=>{ e.preventDefault(); ac();
+  if(S.mode==="match"&&scen&&!scen.resolved&&!$("btnPlayOn").disabled)decide(false); });
 $("btnNew").addEventListener("click",()=>{
   ac(); sfx.ui();
   if(career&&career.totCalls>0&&!confirm("Start over? Your current career will be wiped."))return;
@@ -1186,13 +1225,8 @@ function frame(now){
     }else if(m.phase==="verdict"&&scen&&scen.snap){
       drawSnapshot(scen,now/1000,dt);
     }
-  }else{
-    // ambient: stand on the line of an empty stadium behind the menus
-    CAM.cy=30+Math.sin(now/9000)*6;
-    CAM.yaw=CAM.baseYaw+Math.sin(now/13000)*.05;
-    drawWorld(career?career.tier:6, now/1000);
-    postFX(now/1000);
   }
+  // menu screens are opaque — skip canvas work entirely while they're up
   requestAnimationFrame(frame);
 }
 
