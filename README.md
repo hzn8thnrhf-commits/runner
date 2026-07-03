@@ -7,22 +7,32 @@ way to the Premier League.
 
 ## The game
 
+- **First-person, through the linesman's eyes.** You stand on the touchline
+  and automatically side-step to stay level with the second-last defender —
+  the vertical hairline on the turf is your sight line, exactly how real
+  assistant referees work. Drag to glance toward the ball, at the cost of
+  taking your eye off the line.
 - **Career mode across 7 tiers**: Sunday League → County League → National
   League → League Two → League One → Championship → Premier League.
-- Each matchday is a series of offside **decisions**: an attack plays out,
-  the through-ball is struck (watch for the flash), and you must hit
-  **🚩 FLAG** or **✋ PLAY ON** before the window closes.
+- Each matchday is a series of offside **decisions**: the attack builds on
+  your left, the through-ball is struck (thump + flash), and you must hit
+  **FLAG** or **PLAY ON** before the window closes. Flag too early or
+  freeze entirely and you're punished either way.
 - **Real offside law**: judged at the moment the ball is played, against the
   second-last defender. Level is onside. You can't be offside from a
   backward pass or in your own half — the game throws these trick scenarios
   at you in the higher tiers.
-- **VAR replay after every call**: a freeze-frame at the moment of the pass
-  with the offside line drawn and your margin in metres.
+- **Review after every call**: a freeze-frame at the moment of the pass with
+  the true offside line painted on the turf, TV-style, and your margin in
+  metres.
 - Margins tighten and play speeds up as you climb. Pass the assessor's mark
   to get promoted; a shocker can get you **demoted**.
-- Reputation, career accuracy, and progress are saved on-device
-  (localStorage). GTA-flavoured bold cel-shaded graphics, synthesized
-  crowd/whistle/kick audio, haptics where supported.
+- **Atmosphere scales with the pyramid**: overcast park pitches, hedges and
+  mud in Sunday League up to floodlit night stadiums with packed stands in
+  the Premier League. Full perspective 3D projection, depth fog, film grain
+  and vignette, realistic player proportions with kits and shirt numbers,
+  synthesized crowd/whistle/kick audio, haptics where supported. Career
+  progress saves on-device (localStorage).
 
 ## Play it on your iPhone
 

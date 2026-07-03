@@ -1,4 +1,4 @@
-const CACHE = "linesman-v1";
+const CACHE = "linesman-v3";
 const ASSETS = ["./", "index.html", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-512.png"];
 
 self.addEventListener("install", e => {
